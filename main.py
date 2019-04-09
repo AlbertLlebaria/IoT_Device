@@ -1,50 +1,45 @@
-import binascii
-import pycom
-import socket
-import time
-from network import LoRa
+from machine import I2C, Pin, Timer
+from clock import Clock
+from time import sleep_ms, ticks_ms, ticks_us
+from array import array
+import ads1x15
+from lora import send_data_to_app
+#yellow cable = SCL = PIN9
+#green cable = SDA = PIN10
 
-# Colors
-off = 0x000000
-red = 0xff0000
-green = 0x00ff00
-blue = 0x0000ff
+irq_busy = False
+index_put = 0
+ADC_RATE = 5
 
-# Turn off heartbeat LED
-pycom.heartbeat(False)
+gain = 1
+addr = 72
+_BUFFERSIZE = const(512)
 
-# Initialize LoRaWAN radio
-lora = LoRa(mode=LoRa.LORAWAN)
+data = array("h", (0 for _ in range(_BUFFERSIZE)))
+timestamp = array("L", (0 for _ in range(_BUFFERSIZE)))
 
-# Set network keys
-app_eui = binascii.unhexlify('70B3D57ED0018FFF')
-app_key = binascii.unhexlify('A693EDE05F217BB6283C0E6CAEFF512A')
+i2c = I2C(0, pins=('P10','P9'))     # create and use non-default PIN assignments (P10=SDA, P11=SCL)
+adc = ads1x15.ADS1115(i2c, addr, gain)
 
-# Join the network
-lora.join(activation=LoRa.OTAA, auth=(app_eui, app_key), timeout=0)
-pycom.rgbled(red)
+#
+# Interrupt service routine for data acquisition
+# called by a timer interrupt
+#
+def handler( adc = adc.read_rev, data=data, timestamp = timestamp, voltage = adc.raw_to_v):
+    global index_put, irq_busy
+    if irq_busy:
+        return
+    irq_busy = True
+    if index_put < _BUFFERSIZE:
+        timestamp[index_put] = ticks_us()
+        raw = adc()
+        v = voltage(raw)
+        data[index_put] =raw
+        index_put += 1
+        send_data_to_app(v)
+    irq_busy = False
 
-# Loop until joined
-while not lora.has_joined():
-    print('Not joined yet...')
-    pycom.rgbled(off)
-    time.sleep(0.1)
-    pycom.rgbled(red)
-    time.sleep(2)
-
-print('Joined')
-pycom.rgbled(blue)
-
-s = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
-s.setsockopt(socket.SOL_LORA, socket.SO_DR, 5)
-s.setblocking(True)
-
-i = 0
-while True:
-    count = s.send(bytes([i % 256]))
-    print('Sent %s bytes' % count)
-    pycom.rgbled(green)
-    time.sleep(0.1)
-    pycom.rgbled(blue)
-    time.sleep(9.9)
-i += 1
+adc.set_conv(7, 0) # start the first conversion
+# set the conversion rate to 860 SPS = 1.16 ms; that leaves about
+# 3 ms time for processing the data with a 5 ms timer
+chrono = Clock(handler, 5)
