@@ -23,18 +23,13 @@ app_key = binascii.unhexlify('A693EDE05F217BB6283C0E6CAEFF512A')
 
 # Join the network
 lora.join(activation=LoRa.OTAA, auth=(app_eui, app_key), timeout=0)
-pycom.rgbled(red)
 
 # Loop until joined
 while not lora.has_joined():
     print('Not joined yet...')
-    pycom.rgbled(off)
-    time.sleep(0.1)
-    pycom.rgbled(red)
     time.sleep(2)
 
 print('Joined')
-pycom.rgbled(blue)
 
 s = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
 s.setsockopt(socket.SOL_LORA, socket.SO_DR, 5)
@@ -42,9 +37,7 @@ s.setblocking(True)
 
 
 def send_data_to_app(value):
-    pycom.rgbled(green)
-    ba= bytearray(struct.pack("f", value))
+    ba = bytearray(struct.pack("f", value))
     bytes =[ "0x%02x" % b for b in ba ]
-    print(bytes)
+    print(bytes, value)
     s.send(ba)
-    pycom.rgbled(blue)
